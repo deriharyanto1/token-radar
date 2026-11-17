@@ -1,14 +1,17 @@
-// Token Radar (radar-2): a program/v1 entry for token-radar-01, Node 22, standard library only.
+// Token Radar (radar-3): a program/v1 entry for token-radar-01, Node 22, standard library only.
 //
 // The program reads the sealed snapshot at /input/snapshot.json (or --input <file|dir>), scores every
-// pre-token protocol with the radar-2 model in lib/model.ts, writes the ranked board to
-// /output/board.json, writes the dashboard's dataset as /output/data.js beside the page, copies this
-// repository's dashboard/ and screenshots/ to /output, and writes /output/dossier.json with the
-// vendored make.fun library (vendor/makefun-board.ts).
+// pre-token protocol with the radar-3 model in lib/model.ts — a comparables valuation anchored to the
+// median market-cap-to-TVL ratio of the live-token protocols in the same category, computed from the
+// snapshot at run time — writes the ranked board to /output/board.json, writes the dashboard's
+// dataset as /output/data.js beside the page, copies this repository's dashboard/ and screenshots/
+// to /output, and writes /output/dossier.json with the vendored make.fun library
+// (vendor/makefun-board.ts).
 //
-// The board is the model's own claim: implied value follows from each protocol's TVL, its seven-day
-// growth and how long it has run with no token, and nothing else. Protocols whose token already
-// trades are set aside in a Live token view with their market caps, never ranked as launches.
+// The board is the model's own claim: implied value follows from each protocol's category multiple,
+// its TVL, its seven-day growth and how long it has run with no token, and nothing else. Protocols
+// whose token already trades are set aside in a Live token view with their market caps, never
+// ranked as launches.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json

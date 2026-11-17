@@ -1,4 +1,4 @@
-// Token Radar's dashboard (radar-2). It reads window.RADAR (written beside dashboard/ by main.ts)
+// Token Radar's dashboard (radar-3). It reads window.RADAR (written beside dashboard/ by main.ts)
 // and renders the ranked board, a filterable table, a per-protocol detail panel with the model's own
 // inputs and the protocol's farm plan. No network: every byte it shows is in data.js.
 //
@@ -32,16 +32,18 @@
     return Math.max(0, Math.round(days)) + 'd';
   }
 
-  // radar-2, the same function lib/model.ts runs: size x scale x growth x maturity x chain.
+  // radar-3, the same function lib/model.ts runs: TVL x category multiple x growth x maturity x chain.
+  // The category multiple is carried on the row (data.js): the page cannot recompute the category
+  // medians from its 24 live rows alone, so the row states the multiple and the count behind it.
   function impliedOf(row, model) {
     var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
     var growthMult = 1 + (growth / 100) * model.growth_weight;
     var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
-    var maturity = model.maturity_floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-    var scale = Math.min(model.scale_cap, Math.max(model.scale_floor, Math.pow(row.tvl_usd / model.scale_reference_usd, model.scale_exponent)));
+    var maturity = model.maturity_floor + model.maturity_range * (1 - Math.exp(-Math.max(age, 0) / model.maturity_half_life_days));
     var chainCount = row.chains ? row.chains.length : 0;
     var chainFactor = 1 + Math.min(Math.max(chainCount - 1, 0), model.chain_cap) * model.chain_step;
-    return Math.max(1, Math.round(row.tvl_usd * model.base_multiple * scale * growthMult * maturity * chainFactor));
+    var multiple = row.category_multiple;
+    return Math.max(1, Math.round(Math.min(row.tvl_usd * multiple * growthMult * maturity * chainFactor, model.implied_value_cap_usd)));
   }
 
   function el(tag, attrs) {
@@ -338,19 +340,38 @@
 
   function modelPanel() {
     var m = DATA.model;
+    var c = DATA.comparables;
     return el('section', { class: 'panel model' },
       el('h2', { text: 'How implied value is computed' }),
       el('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
       el('div', { class: 'formula' },
-        'implied = round( tvl_usd x ' + m.base_multiple + ' x clamp((tvl_usd / ' + m.scale_reference_usd + ') ^ ' + m.scale_exponent + ', ' + m.scale_floor + ', ' + m.scale_cap + ') x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') x (1 + min(chains - 1, ' + m.chain_cap + ') x ' + m.chain_step + ') )'
+        'implied = round( min( tvl_usd x category_multiple x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + ' + m.maturity_range + ' x (1 - exp(-age_days / ' + m.maturity_half_life_days + '))) x (1 + min(chains - 1, ' + m.chain_cap + ') x ' + m.chain_step + '), ' + m.implied_value_cap_usd + ') )'
       ),
       el('ul', null,
-        el('li', null, el('b', { text: 'Size. ' }), 'A token is worth a fifth of the value locked in its protocol.'),
-        el('li', null, el('b', { text: 'Scale. ' }), 'Value grows slower than TVL: big protocols count less per dollar, small ones a little more.'),
-        el('li', null, el('b', { text: 'Growth. ' }), 'Seven-day growth is clamped hard, so a one-week spike cannot carry a row.'),
-        el('li', null, el('b', { text: 'Maturity. ' }), 'Age is the time since first listing: the longer a protocol has run with no token, the more its record is worth. An unknown age reads as ' + m.unknown_age_days + ' days.'),
+        el('li', null, el('b', { text: 'Comparables. ' }), 'The base multiple is the median market-cap-to-TVL ratio of the live-token protocols in the same category (at least ' + m.comparable_min_count + ' of them, each with TVL of $' + (m.comparable_tvl_floor_usd / 1e6) + 'M or more). Fewer than that, the row uses the global median of ' + c.global_count + ' live-token protocols (' + c.global_multiple + '). The multiples are computed from the snapshot at run time, never written into the code.'),
+        el('li', null, el('b', { text: 'Why a median. ' }), 'One outlier token would drag a mean anywhere; the median is the middle protocol of the category, so a single huge or tiny market cap cannot carry a row.'),
+        el('li', null, el('b', { text: 'Growth. ' }), 'Seven-day growth is clamped hard, so a one-week spike cannot carry a row: beyond the bounds the factor stops moving.'),
+        el('li', null, el('b', { text: 'Maturity. ' }), 'Age is saturating, not linear: the value of having run longer with no token rises steeply in the first year and then plateaus. An unknown age reads as ' + m.unknown_age_days + ' days.'),
         el('li', null, el('b', { text: 'Chain diversity. ' }), 'A protocol live on more chains reaches more users, so each extra chain (up to ' + m.chain_cap + ') adds ' + (m.chain_step * 100) + '% to the implied value.'),
         el('li', null, el('b', { text: 'Early radar. ' }), 'Protocols below the watchlist floor pass the same product rule as the watchlist itself, and are taken strongest first by this same model.')
+      ),
+      el('h3', { text: 'Category multiples from this snapshot' }),
+      el('p', { class: 'sub', text: 'Median market-cap-to-TVL ratio of the live-token protocols in each category, with the count behind it. Rows in a category with fewer than ' + m.comparable_min_count + ' comparables use the global median instead.' }),
+      el('div', { class: 'table-wrap' },
+        el('table', { class: 'comparables' },
+          el('thead', null, el('tr', null, el('th', { scope: 'col', text: 'Category' }), el('th', { scope: 'col', text: 'Multiple' }), el('th', { scope: 'col', text: 'Comparables' }))),
+          el('tbody', null, c.categories.map(function (x) {
+            return el('tr', null,
+              el('td', { text: x.category }),
+              el('td', { class: 'num', text: String(x.multiple) }),
+              el('td', { class: 'num', text: String(x.count) })
+            );
+          }).concat([el('tr', null,
+            el('td', { text: 'Global (fallback)' }),
+            el('td', { class: 'num', text: String(c.global_multiple) }),
+            el('td', { class: 'num', text: String(c.global_count) })
+          )]))
+        )
       )
     );
   }
@@ -390,9 +411,11 @@
       el('h3', { text: 'Implied value' }),
       el('div', { class: 'equation' },
         el('div', null, el('span', { text: 'TVL' }), el('b', { class: 'num', text: fmtUsd(row.tvl_usd) })),
+        el('div', null, el('span', { text: 'Category' }), el('b', { class: 'num', text: row.category || 'Other' })),
+        el('div', null, el('span', { text: 'Category multiple' }), el('b', { class: 'num', text: Number(row.category_multiple).toFixed(4) + (row.comparables_source === 'global' ? ' (global)' : '') })),
+        el('div', null, el('span', { text: 'Comparables' }), el('b', { class: 'num', text: row.comparables_source === 'global' ? 'global median, ' + DATA.comparables.global_count + ' live tokens' : String(row.comparables_count) + ' live ' + (row.category || 'Other') + ' tokens' })),
         el('div', null, el('span', { text: 'Seven-day growth' }), el('b', { class: 'num', text: fmtPct(row.change_7d) })),
         el('div', null, el('span', { text: 'Age with no token' }), el('b', { class: 'num', text: fmtAge(row.age_days) })),
-        el('div', null, el('span', { text: 'Size scale' }), el('b', { class: 'num', text: String(row.scale_multiplier) })),
         el('div', null, el('span', { text: 'Growth multiplier' }), el('b', { class: 'num', text: String(row.growth_multiplier) })),
         el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { class: 'num', text: String(row.maturity_multiplier) })),
         el('div', null, el('span', { text: 'Chains' }), el('b', { class: 'num', text: String((row.chains || []).length) + ((row.chains || []).length === 1 ? ' chain' : ' chains') })),

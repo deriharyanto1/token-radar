@@ -10,22 +10,30 @@ The entry reads a sealed snapshot of 758 DefiLlama protocols (snapshot 2026-11-1
 pre-token protocol on the watchlist — plus the strongest pre-token protocols below the $50M floor —
 by an implied value, and gives each one a concrete farm plan.
 
-## The model (radar-2)
+## The model (radar-3)
 
-Implied value follows only from the snapshot's own figures — a protocol's TVL, its seven-day
-growth, and how long it has run with no token. No protocol name is ever special-cased.
+Implied value is a comparables valuation: it starts from what the market already pays for the
+same kind of protocol, then adjusts that multiple for the protocol's own record. The multiples
+are computed from the sealed snapshot at run time — the median market-cap-to-TVL ratio of the
+live-token protocols in the same category (at least 3 of them, each with TVL of $10M or more),
+else the global median across all 114 such protocols. No protocol name is ever special-cased,
+and no multiple is written into the code.
 
 ```
-implied = round( tvl_usd x 0.20
-               x clamp((tvl_usd / 1e9) ^ -0.15, 0.5, 2.0)
-               x (1 + clamp(change_7d, -50, 150) / 100 x 0.6)
-               x (0.55 + min(age_days, 1460) / 1460 x 0.65) )
+implied = round( min( tvl_usd x category_multiple
+                    x (1 + clamp(change_7d, -50, 150) / 100 x 0.6)
+                    x (0.55 + 0.65 x (1 - exp(-age_days / 730)))
+                    x (1 + min(chains - 1, 4) x 0.04), 100,000,000,000 ) )
 ```
 
-- **Size:** a token is worth a fifth of the value locked in its protocol.
-- **Scale:** value grows slower than TVL, so large protocols count less per dollar.
-- **Growth:** seven-day growth is clamped hard, so a one-week spike cannot carry a row.
-- **Maturity:** age is the time since first listing; an unknown age reads as 300 days.
+- **Comparables:** the base multiple is the market's own valuation for the category — Dexs
+  trade near 0.34x TVL, Lending near 0.13x, Privacy near 0.97x. A median, not a mean, so one
+  outlier token cannot carry a row; fewer than 3 comparables in a category, and the row uses
+  the global median (0.1315).
+- **Growth:** seven-day growth is clamped hard, so a one-week spike cannot carry a row; beyond
+  the bounds the factor stops moving.
+- **Maturity:** age is saturating, not linear — the value of having run longer with no token
+  rises steeply in the first year and then plateaus. An unknown age reads as 300 days.
 - **Separation:** protocols whose token already trades are set aside in a Live token view with
   their market caps, never ranked as launches. The early radar below the floor passes the same
   product rule as the watchlist itself (no bridges, liquid staking, restaking, CEX, versioned
